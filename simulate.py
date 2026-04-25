@@ -14,9 +14,11 @@ import output_algo as oa_mod
 import batch_algo as ba_mod
 import random
 import uuid
+import json
 
+simulation_frames = []
 
-def run_simulation(seed=42):
+def run_simulation(seed=42, record_file="simulation_record.json"):
     random.seed(seed)
 
     print("=" * 60)
@@ -202,6 +204,22 @@ def run_simulation(seed=42):
                 relocations_triggered += 1
 
             qm.remove_task(move.id)
+            
+        # ── Frame Recording ──
+        frame_grid = []
+        for loc, box in wh.grid.items():
+            frame_grid.append({"x": loc[0], "y": loc[1], "z": loc[2], "code": box.destination_code[-2:]})
+            
+        frame_shuttles = []
+        for s in shuttles:
+            frame_shuttles.append({"x": s.current_x, "y": s.y_level})
+            
+        simulation_frames.append({
+            "tick": tick,
+            "grid": frame_grid,
+            "shuttles": frame_shuttles,
+            "stats": {"inbound": inbound_count, "outbound": outbound_count, "dist": total_distance}
+        })
 
         # ── 3. Termination check ─────────────────────────────────
         if completed_pallets >= NUM_PALLETS:
@@ -276,6 +294,14 @@ def run_simulation(seed=42):
     print(f"  Distance Improvement:         {improvement_d:.1f}%")
     print(f"  Time Improvement:             {improvement_t:.1f}%")
     print("=" * 60)
+    
+    if record_file:
+        with open(record_file, "w") as f:
+            json.dump({
+                "settings": {"max_x": MAX_X, "max_y": MAX_Y},
+                "frames": simulation_frames
+            }, f)
+        print(f"Graphical record saved to {record_file}")
 
 
 if __name__ == "__main__":

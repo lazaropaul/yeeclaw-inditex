@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IRA Warehouse Simulation</title>
+    <style>
+        body { 
+            background: #0f111a; 
+            color: #00ffcc; 
+            font-family: 'Courier New', Courier, monospace; 
+            margin: 0; 
+            padding: 20px; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+        }
+        h1 { margin-top: 0; color: #fff; text-transform: uppercase; letter-spacing: 2px; }
+        h1 span { color: #00ffcc; }
+        #canvas-container { 
+            margin: 20px 0; 
+            border: 2px solid #333; 
+            border-radius: 8px;
+            box-shadow: 0 0 30px #00ffcc22; 
+            background: #141722;
+        }
+        .controls { 
+            display: flex; 
+            gap: 15px; 
+            align-items: center; 
+            width: 100%; 
+            max-width: 1020px; 
+            background: #1c2030;
+            padding: 15px;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+        button { 
+            background: #00ffcc; 
+            color: #0f111a; 
+            border: none; 
+            padding: 10px 20px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            border-radius: 4px; 
+            text-transform: uppercase;
+        }
+        button:hover { background: #00ccaa; }
+        input[type=range] { flex-grow: 1; cursor: pointer; }
+        #tickDisplay { font-weight: bold; min-width: 100px; text-align: center;}
+        
+        .stats { 
+            display: flex; 
+            gap: 20px; 
+            width: 100%; 
+            max-width: 1020px; 
+            margin-top: 20px;
+            justify-content: space-between; 
+        }
+        .stat-box { 
+            flex: 1;
+            background: #1c2030;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center; 
+            border-bottom: 3px solid #333;
+        }
+        .stat-box:nth-child(1) { border-color: #00ffcc; }
+        .stat-box:nth-child(2) { border-color: #ff0055; }
+        .stat-box:nth-child(3) { border-color: #f1c40f; }
+
+        .stat-title { font-size: 14px; opacity: 0.8; margin-bottom: 10px;}
+        .stat-val { font-size: 32px; font-weight: bold; color: #fff; }
+        
+        .legend { margin-top: 20px; display: flex; gap: 20px; font-size: 14px; opacity: 0.8; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .color-box { width: 16px; height: 16px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1><span>INDITEX</span>TECH: IRA SIMULATION</h1>
+    
+    <div id="canvas-container">
+        <canvas id="warehouseCanvas" width="1020" height="420"></canvas>
+    </div>
+    
+    <div class="controls">
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn">Pause</button>
+        <span id="tickDisplay">Tick: 0</span>
+        <input type="range" id="timeline" min="0" max="0" value="0">
+    </div>
+
+    <div class="stats">
+        <div class="stat-box">
+            <div class="stat-title">INBOUNDS STORED</div>
+            <div class="stat-val" id="statInbound">0</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-title">OUTBOUNDS CLEARED</div>
+            <div class="stat-val" id="statOutbound">0</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-title">TRAVEL COST (d)</div>
+            <div class="stat-val" id="statDist">0</div>
+        </div>
+    </div>
+    
+    <div class="legend">
+        <div class="legend-item"><div class="color-box" style="background: #004433;"></div> Z=2 (Deep Storage)</div>
+        <div class="legend-item"><div class="color-box" style="background: #00ffcc;"></div> Z=1 (Front Storage)</div>
+        <div class="legend-item"><div class="color-box" style="background: #ff0055; border-radius: 50%;"></div> Shuttle</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('warehouseCanvas');
+        const ctx = canvas.getContext('2d');
+        const CELL_SIZE = 20; 
+        const Y_SPACING = 38; 
+        
+        let frames = [];
+        let currentFrameIdx = 0;
+        let isPlaying = false;
+
+        // Fetch Local Data
+        fetch('simulation_record.json')
+            .then(res => res.json())
+            .then(data => {
+                frames = data.frames;
+                document.getElementById('timeline').max = frames.length - 1;
+                renderFrame(0);
+            })
+            .catch(err => {
+                console.error("Run python3 simulate.py to generate record!");
+                ctx.fillStyle = '#fff';
+                ctx.fillText("Failed to load simulation_record.json. Did you run simulate.py?", 20, 50);
+            });
+
+        function playLoop() {
+            if (!isPlaying) return;
+            currentFrameIdx++;
+            if (currentFrameIdx >= frames.length) {
+                isPlaying = false;
+            } else {
+                renderFrame(currentFrameIdx);
+                document.getElementById('timeline').value = currentFrameIdx;
+                setTimeout(playLoop, 60); // fast simulation
+            }
+        }
+
+        document.getElementById('playBtn').onclick = () => { if (!isPlaying) { isPlaying = true; playLoop(); } };
+        document.getElementById('pauseBtn').onclick = () => { isPlaying = false; };
+        document.getElementById('timeline').oninput = (e) => {
+            isPlaying = false;
+            currentFrameIdx = parseInt(e.target.value);
+            renderFrame(currentFrameIdx);
+        };
+
+        function renderFrame(idx) {
+            if (!frames[idx]) return;
+            const frame = frames[idx];
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw Rails
+            ctx.strokeStyle = '#2a2e40';
+            ctx.lineWidth = 2;
+            for (let y = 1; y <= 10; y++) {
+                ctx.beginPath(); 
+                ctx.moveTo(10, y * Y_SPACING); 
+                ctx.lineTo(1010, y * Y_SPACING); 
+                ctx.stroke();
+            }
+
+            // Draw Head of aisle line
+            ctx.strokeStyle = '#ff005544';
+            ctx.beginPath(); 
+            ctx.moveTo(CELL_SIZE - 5, 20); 
+            ctx.lineTo(CELL_SIZE - 5, 400); 
+            ctx.stroke();
+
+            // Draw boxes
+            frame.grid.forEach(box => {
+                const px = box.x * CELL_SIZE;
+                const py = box.y * Y_SPACING - 16;
+                
+                if (box.z === 2) {
+                    ctx.fillStyle = '#004433';
+                    ctx.fillRect(px + 1, py - 4, CELL_SIZE - 2, 10);
+                    ctx.fillStyle = '#00ffcc55';
+                    ctx.font = '7px monospace';
+                    ctx.fillText(box.code, px + 2, py + 4);
+                } else {
+                    ctx.fillStyle = '#00ccaa';
+                    ctx.fillRect(px + 1, py + 8, CELL_SIZE - 2, 10);
+                    ctx.fillStyle = '#000';
+                    ctx.font = '7px monospace';
+                    ctx.fillText(box.code, px + 2, py + 16);
+                }
+            });
+
+            // Draw shuttles
+            frame.shuttles.forEach(s => {
+                const px = s.x * CELL_SIZE;
+                const py = s.y * Y_SPACING;
+                
+                ctx.fillStyle = '#ff0055';
+                ctx.beginPath();
+                ctx.arc(px + CELL_SIZE/2, py, 6, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Shuttle glow
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#ff0055';
+                ctx.beginPath();
+                ctx.arc(px + CELL_SIZE/2, py, 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            });
+
+            // Update stats
+            document.getElementById('tickDisplay').innerText = `Tick: ${frame.tick}`;
+            document.getElementById('statInbound').innerText = frame.stats.inbound;
+            document.getElementById('statOutbound').innerText = frame.stats.outbound;
+            document.getElementById('statDist').innerText = frame.stats.dist.toLocaleString();
+        }
+    </script>
+</body>
+</html>
