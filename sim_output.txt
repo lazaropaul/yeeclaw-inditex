@@ -1,0 +1,16 @@
+==================================================
+      IRA Algorithm Simulation & Statistics       
+==================================================
+[Phase 1] Generating 480 INBOUND storage tasks...
+[Phase 2] Activating initial 8 pallets...
+[Phase 3] Starting IRA Shuttle processing...
+
+==================================================
+             SIMULATION RESULTS                   
+==================================================
+Total Pallets processed:    0 (0 boxes)
+Total Inbounds processed:   480
+Total RELOCATIONS (Z=2):    0
+--------------------------------------------------
+Total Distance Traveled:    479 grid units
+Total Time Cost (10+d):     5279 seconds

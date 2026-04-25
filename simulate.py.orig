@@ -1,0 +1,157 @@
+from models import Box, Shuttle, Location, TaskType
+from warehouse import warehouse
+from queue_manager import queue
+from input_algo import input_algorithm
+from output_algo import output_algorithm
+import random
+import uuid
+
+def run_simulation():
+    print("==================================================")
+    print("      IRA Algorithm Simulation & Statistics       ")
+    print("==================================================")
+
+    # Config
+    NUM_PALLETS = 40
+    BOXES_PER_PALLET = 12
+    SHUTTLE_COUNT = warehouse.max_y  # 1 shuttle per Y level
+    
+    pallets = [f"PALLET_{i}" for i in range(1, NUM_PALLETS + 1)]
+    boxes_to_inbound = []
+    
+    for pallet in pallets:
+        for _ in range(BOXES_PER_PALLET):
+            boxes_to_inbound.append(Box(id=str(uuid.uuid4())[:8], destination_code=pallet))
+            
+    # Shuffle so they arrive in random order
+    random.shuffle(boxes_to_inbound)
+
+    print(f"[Phase 1] Generating {len(boxes_to_inbound)} INBOUND storage tasks...")
+    # Inject all into input algorithm (they will enter the Queue, but not physically stored yet)
+    for box in boxes_to_inbound:
+        # Assign preferring random y levels to balance load
+        prefer_y = random.randint(1, warehouse.max_y)
+        input_algorithm.assign_storage_location(box, preferred_y=prefer_y)
+
+    shuttles = [Shuttle(id=f"shuttle_{y}", y_level=y, current_x=0) for y in range(1, SHUTTLE_COUNT + 1)]
+
+    # Metrics
+    total_time_cost = 0
+    total_distance = 0
+    relocations_triggered = 0
+    inbound_count = 0
+    outbound_count = 0
+    
+    # Run the main loop for Inbound First
+    print("[Phase 1.5] Executing INBOUND tasks to build warehouse stock...")
+    while queue.get_all_tasks():
+        for shuttle in shuttles:
+            move = output_algorithm.get_next_move(shuttle)
+            if not move: continue
+            
+            d = abs(shuttle.current_x - 0) # Inbound pickup is 0
+            time_cost = 10 + d
+            total_time_cost += time_cost
+            total_distance += d
+            
+            shuttle.current_x = move.target_location.x
+            inbound_count += 1
+            
+            warehouse.place_box(move.box, move.target_location)
+            queue.remove_task(move.id)
+
+
+    print("[Phase 2] Activating initial 8 pallets...")
+    pallets_to_activate = pallets.copy()
+    active_pallets = set()
+    completed_pallets_count = 0
+    pallet_box_counts = {p: 0 for p in pallets}
+    
+    def maintain_active_pallets():
+        while len(active_pallets) < 8 and pallets_to_activate:
+            new_pallet = pallets_to_activate.pop(0)
+            active_pallets.add(new_pallet)
+            queue.intervene(new_pallet)
+            
+            # Scan warehouse for any boxes matching this code, and push OUTBOUND tasks
+            for loc_tuple, box in list(warehouse.grid.items()):
+                if box.destination_code == new_pallet:
+                    loc = Location(x=loc_tuple[0], y=loc_tuple[1], z=loc_tuple[2])
+                    from models import Task, TaskType
+                    import uuid
+                    task = Task(id=str(uuid.uuid4()), task_type=TaskType.OUTBOUND, box=box, target_location=loc, is_active=True)
+                    queue.add_task(task)
+            print(f"Pallet {new_pallet} activated. Total tasks now: {len(queue.get_all_tasks())}")
+            
+    maintain_active_pallets()
+
+    print("[Phase 3] Starting IRA Shuttle processing for OUTBOUNDs...\n")
+    
+    # Loop until all OUTBOUND tasks are gone
+    while queue.get_all_tasks():
+        tasks_processed_this_tick = 0
+        
+        for shuttle in shuttles:
+            # IRA Core: Get Next Optimal Move
+            move = output_algorithm.get_next_move(shuttle)
+            
+            if not move:
+                continue
+                
+            tasks_processed_this_tick += 1
+            pickup_x = move.target_location.x if move.task_type != TaskType.INBOUND else 0
+                
+            # Calculate IRA distance
+            d = abs(shuttle.current_x - pickup_x)
+            time_cost = 10 + d
+            
+            total_time_cost += time_cost
+            total_distance += d
+            
+            if move.task_type == TaskType.INBOUND:
+                shuttle.current_x = move.target_location.x
+                inbound_count += 1
+                warehouse.place_box(move.box, move.target_location)
+            elif move.task_type == TaskType.OUTBOUND:
+                shuttle.current_x = 0 # Drop off happens at head of aisle
+                outbound_count += 1
+                warehouse.remove_box(move.target_location)
+                
+                # Check pallet completion
+                dest = move.box.destination_code
+                pallet_box_counts[dest] += 1
+                if pallet_box_counts[dest] == BOXES_PER_PALLET:
+                    active_pallets.remove(dest)
+                    queue.complete_pallet(dest)
+                    completed_pallets_count += 1
+                    maintain_active_pallets()
+                    
+            elif move.task_type == TaskType.RELOCATION:
+                shuttle.current_x = move.dropoff_location.x
+                relocations_triggered += 1
+                warehouse.remove_box(move.target_location)
+                warehouse.place_box(move.box, move.dropoff_location)
+            
+            queue.remove_task(move.id)
+            
+        if tasks_processed_this_tick == 0:
+            if queue.get_all_tasks():
+                print("WARNING: Deadlock detected, breaking.")
+                break
+
+    # Stats Printout
+    print("==================================================")
+    print("             SIMULATION RESULTS                   ")
+    print("==================================================")
+    print(f"Total Pallets processed:    {completed_pallets_count} ({outbound_count} boxes)")
+    print(f"Total Inbounds processed:   {inbound_count}")
+    print(f"Total RELOCATIONS (Z=2):    {relocations_triggered}")
+    print("--------------------------------------------------")
+    print(f"Total Distance Traveled:    {total_distance} grid units")
+    print(f"Total Time Cost (10+d):     {total_time_cost} seconds")
+    
+    # The average distance manually retrieved in naive FIFO would be roughly X (going there) + X (returning)
+    print(f"\nAverage Distance per Task:  {total_distance / (inbound_count + outbound_count + relocations_triggered):.2f}")
+
+if __name__ == "__main__":
+    run_simulation()

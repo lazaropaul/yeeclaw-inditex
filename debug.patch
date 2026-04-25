@@ -1,0 +1,10 @@
+--- simulate.py
++++ simulate.py
+@@ -62,6 +62,7 @@
+             queue.remove_task(move.id)
+ 
+ 
++    print(f"DEBUG grid length after phase 1.5: {len(warehouse.grid)}")
+     print("[Phase 2] Activating initial 8 pallets...")
+     pallets_to_activate = pallets.copy()
+     active_pallets = set()
