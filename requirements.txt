@@ -1,3 +1,4 @@
+ampl-module-base==20250901
 amplpy==0.16.0
 ampltools==0.7.5
 annotated-doc==0.0.4
