@@ -136,7 +136,9 @@ class SiloState:
     Y_RANGE = range(1, 9)      # 1-8
     Z_RANGE = range(1, 3)      # 1-2
 
-    def __init__(self) -> None:
+    def __init__(self, num_destinations: int = 40) -> None:
+        self.num_destinations = num_destinations
+        self.incoming_queue: deque[Box] = deque()
         self.grid: dict[SiloPosition, Box | None] = {}
         self.box_registry: dict[str, Box] = {}
         self.destination_index: defaultdict[str, list[SiloPosition]] = defaultdict(list)
@@ -284,9 +286,9 @@ def parse_box(box_code: str) -> Box:
     )
 
 
-def initialize_silo() -> SiloState:
+def initialize_silo(num_destinations: int = 40) -> SiloState:
     """Construye un SiloState vacío con todas las celdas y shuttles inicializados."""
-    silo = SiloState()
+    silo = SiloState(num_destinations=num_destinations)
 
     # Crear el grid completo: 4 × 2 × 60 × 8 × 2 = 7 680 posiciones
     for aisle, side, x, y, z in itertools.product(
@@ -303,76 +305,3 @@ def initialize_silo() -> SiloState:
         silo.shuttles[(aisle, y_level)] = Shuttle(aisle=aisle, y_level=y_level)
 
     return silo
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Test básico
-# ──────────────────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("  SILO STATE — Test básico")
-    print("=" * 60)
-
-    # 1. Inicializar silo vacío
-    silo = initialize_silo()
-    print(f"\nSilo inicializado: {silo}")
-    print(f"   Posiciones totales: {len(silo.grid)}")
-    print(f"   Shuttles: {len(silo.shuttles)}")
-
-    # 2. Parsear 3 cajas de ejemplo
-    codes = [
-        "30100280122093090329",
-        "30100280122093190330",
-        "30100281234567890001",
-    ]
-    boxes = [parse_box(c) for c in codes]
-
-    print("\nCajas parseadas:")
-    for b in boxes:
-        print(
-            f"   ID={b.box_id}  origin={b.origin}  "
-            f"dest={b.destination}  bulk={b.bulk_number}"
-        )
-
-    # 3. Colocar la primera caja en una posición (aisle=1, side=1, x=1, y=1, z=1)
-    pos1 = SiloPosition(aisle=1, side=1, x=1, y=1, z=1)
-    silo.place_box(boxes[0], pos1)
-    print(f"\nCaja {boxes[0].box_id} colocada en {pos1}")
-    print(f"   Posición ocupada: {not silo.is_position_free(pos1)}")
-    print(f"   Recuperable: {silo.is_retrievable(pos1)}")
-
-    # 4. Intentar colocar en Z=2 (debería funcionar porque Z=1 está ocupada)
-    pos2 = SiloPosition(aisle=1, side=1, x=1, y=1, z=2)
-    silo.place_box(boxes[1], pos2)
-    print(f"\nCaja {boxes[1].box_id} colocada en {pos2}")
-    print(f"   Recuperable Z=2: {silo.is_retrievable(pos2)} (esperado: False)")
-    print(f"   Recuperable Z=1: {silo.is_retrievable(pos1)} (esperado: True)")
-
-    # 5. Verificar regla Z: no se puede retirar Z=2 si Z=1 está ocupada
-    try:
-        silo.remove_box(pos2)
-        print("\nERROR: no debería poder retirar Z=2 con Z=1 ocupada")
-    except ValueError as e:
-        print(f"\nRegla Z correcta: {e}")
-
-    # 6. Retirar Z=1, luego Z=2 debería ser recuperable
-    removed = silo.remove_box(pos1)
-    print(f"\nRetirada caja de Z=1: {removed.box_id}")
-    print(f"   Recuperable Z=2 ahora: {silo.is_retrievable(pos2)} (esperado: True)")
-
-    # 7. Probar shuttle
-    shuttle = silo.shuttles[(1, 1)]
-    print(f"\nShuttle (1,1): posición={shuttle.current_x}")
-    print(f"   Tiempo a x=30: {shuttle.travel_time(30):.1f}s")
-    print(f"   Tiempo a x=60: {shuttle.travel_time(60):.1f}s")
-
-    # 8. Posiciones libres disponibles
-    free = silo.get_free_positions()
-    print(f"\nPosiciones libres (can_place_at): {len(free)}")
-
-    # 9. Estado final
-    print(f"\n{silo}")
-    print("\n" + "=" * 60)
-    print("  Test completado con éxito")
-    print("=" * 60)

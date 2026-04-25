@@ -21,11 +21,11 @@ def parse_position_code(pos_code: str) -> SiloPosition:
     return SiloPosition(aisle, side, x, y, z)
 
 
-def load_silo_from_csv(csv_path: str | Path) -> SiloState:
+def load_silo_from_csv(csv_path: str | Path, num_destinations: int = 40) -> SiloState:
     """
-    Inicializa un silo vacío y lo pobla con las cajas desde el archivo CSV indicado.
+    Inicializa un silo vacío y lo pobla con las cajas desde el archivo CSV de hackathon (posicion, etiqueta).
     """
-    silo = initialize_silo()
+    silo = initialize_silo(num_destinations=num_destinations)
     
     with open(csv_path, mode='r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
@@ -33,17 +33,12 @@ def load_silo_from_csv(csv_path: str | Path) -> SiloState:
             pos_str = row['posicion'].strip()
             box_id_str = row['etiqueta'].strip()
             
-            # Si una posición está vacía en el CSV, box_id_str podría ser nulo o vacío
             if not box_id_str:
                 continue
                 
             pos = parse_position_code(pos_str)
             box = parse_box(box_id_str)
             
-            # Utilizar force place_box o algo similar dado que podríamos romper restricción Z sin querer al cargar?
-            # Cuando cargamos del csv de golpe, podríamos iterar sin garantizar el orden Z=1 vs Z=2,
-            # lo que haría fallar a silo.place_box() por la regla Z. 
-            # Como solo estamos cargando el estado inicial, inyectamos directamente:
             silo.grid[pos] = box
             box.position = pos
             silo.box_registry[box.box_id] = box
