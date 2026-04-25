@@ -70,6 +70,7 @@ class Box:
     destination: str      # box_id[7:15]
     bulk_number: str      # box_id[15:20]
     position: Optional[SiloPosition] = None
+    arrival_time: float = 0.0
 
     def __post_init__(self) -> None:
         if len(self.box_id) != 20 or not self.box_id.isdigit():
