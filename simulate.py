@@ -11,6 +11,7 @@ import warehouse as wh_mod
 import queue_manager as qm_mod
 import input_algo as ia_mod
 import output_algo as oa_mod
+import batch_algo as ba_mod
 import random
 import uuid
 
@@ -76,28 +77,33 @@ def run_simulation(seed=42):
 
     def activate_pallets_up_to_cap():
         """Activate pallets and generate OUTBOUND tasks for boxes already in grid."""
-        while len(active_pallets) < MAX_ACTIVE_PALLETS and pallets_waiting:
-            code = pallets_waiting.pop(0)
-            active_pallets.add(code)
-            qm.intervene(code)
-            # Scan warehouse grid for boxes matching this code
-            for loc_tuple, box in list(wh.grid.items()):
-                if box.destination_code == code:
-                    # Avoid duplicate OUTBOUND tasks
-                    already_has_task = any(
-                        t.task_type == TaskType.OUTBOUND and t.box.id == box.id
-                        for t in qm.pending_tasks
-                    )
-                    if not already_has_task:
-                        loc = Location(x=loc_tuple[0], y=loc_tuple[1], z=loc_tuple[2])
-                        task = Task(
-                            id=str(uuid.uuid4()),
-                            task_type=TaskType.OUTBOUND,
-                            box=box,
-                            target_location=loc,
-                            is_active=True,
+        needed = MAX_ACTIVE_PALLETS - len(active_pallets)
+        if needed > 0 and pallets_waiting:
+            # Use Simulated Annealing to pick optimal batch
+            best_batch = ba_mod.batch_algo.get_optimal_batch(pallets_waiting, min(needed, len(pallets_waiting)))
+            
+            for code in best_batch:
+                pallets_waiting.remove(code)
+                active_pallets.add(code)
+                qm.intervene(code)
+                # Scan warehouse grid for boxes matching this code
+                for loc_tuple, box in list(wh.grid.items()):
+                    if box.destination_code == code:
+                        # Avoid duplicate OUTBOUND tasks
+                        already_has_task = any(
+                            t.task_type == TaskType.OUTBOUND and t.box.id == box.id
+                            for t in qm.pending_tasks
                         )
-                        qm.add_task(task)
+                        if not already_has_task:
+                            loc = Location(x=loc_tuple[0], y=loc_tuple[1], z=loc_tuple[2])
+                            task = Task(
+                                id=str(uuid.uuid4()),
+                                task_type=TaskType.OUTBOUND,
+                                box=box,
+                                target_location=loc,
+                                is_active=True,
+                            )
+                            qm.add_task(task)
 
     def create_outbound_if_active(box: Box, loc: Location):
         """When a box is physically stored, check if its pallet is already active.

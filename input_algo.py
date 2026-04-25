@@ -7,12 +7,11 @@ class InputAlgorithm:
     @staticmethod
     def assign_storage_location(box: Box, preferred_y: int = 1) -> Task:
         """
-        Finds the optimal storage location for the incoming box, creates an INBOUND task.
-        Prioritizes:
-        1. Empty Z=2 slots (deepest slot).
-        2. Empty Z=1 slots ONLY IF the Box at Z=2 has the same destination_code.
+        Finds the optimal storage location for the incoming box using:
+        1. Class-Based Storage: Strictly evaluates from X=1 outwards to minimize D.
+        2. Association Rule Mining (ARM): Forces identical destination codes together in the Z-axis.
         """
-        # Simplistic scan: iterate starting from X=1. In real world, distribute across Y levels based on usage.
+        # Class-Based loop: forces items into lowest possible X positions first.
         best_loc = None
         
         # We will scan Y starting from preferred_y, then expanding out if full
