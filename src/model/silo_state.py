@@ -86,19 +86,22 @@ class Box:
 @dataclass(slots=True)
 class Shuttle:
     """Shuttle que opera en un (pasillo, nivel_Y).
+
     Hay 4 pasillos × 8 niveles = 32 shuttles.
     Tiempo de movimiento: t = 10 + |x_destino − x_actual| segundos.
     """
+
     aisle: int
     y_level: int
     current_x: float = 0.0
-    busy_until: float = 0.0  # ← AÑADIDO: Controla cuándo el shuttle queda libre
+    busy_until: float = 0.0
     pending_ops: deque = field(default_factory=deque)
     is_busy: bool = False
 
     def travel_time(self, target_x: float) -> float:
         """Tiempo en segundos para moverse a *target_x*."""
         return 10.0 + abs(target_x - self.current_x)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # SiloState
@@ -131,7 +134,7 @@ class SiloState:
     # Rangos estructurales del silo
     AISLES = range(1, 5)       # 1-4
     SIDES = range(1, 3)        # 1-2
-    X_RANGE = range(1,1000)     # 1-1000
+    X_RANGE = range(1, 61)     # 1-60
     Y_RANGE = range(1, 9)      # 1-8
     Z_RANGE = range(1, 3)      # 1-2
 
@@ -299,7 +302,8 @@ def initialize_silo(num_destinations: int = 40) -> SiloState:
     ):
         silo.grid[SiloPosition(aisle, side, x, y, z)] = None
 
-    for y_level in SiloState.Y_RANGE:
-        silo.shuttles[y_level] = Shuttle(aisle=0, y_level=y_level)
-    
+    # Crear los 32 shuttles (1 por combinación pasillo × nivel_Y)
+    for aisle, y_level in itertools.product(SiloState.AISLES, SiloState.Y_RANGE):
+        silo.shuttles[(aisle, y_level)] = Shuttle(aisle=aisle, y_level=y_level)
+
     return silo

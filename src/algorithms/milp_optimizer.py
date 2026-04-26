@@ -14,12 +14,7 @@ class MilpOptimizer:
         if not incoming_boxes:
             return []
 
-        # 🔍 Heurística de pruning: solo evaluar posiciones X <= 30
-        # Reduce variables ~50% sin perder optimalidad práctica (PDF Ejemplo: X=20)
-        valid_positions = [
-            p for p in self.state.grid 
-            if p.x <= 30 and self.state.can_place_at(p)
-        ]
+        valid_positions = [p for p in self.state.grid if self.state.can_place_at(p)]
         
         if not valid_positions:
             return []
