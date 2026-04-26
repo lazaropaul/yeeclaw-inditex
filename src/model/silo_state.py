@@ -94,6 +94,7 @@ class Shuttle:
     aisle: int
     y_level: int
     current_x: float = 0.0
+    busy_until: float = 0.0
     pending_ops: deque = field(default_factory=deque)
     is_busy: bool = False
 
