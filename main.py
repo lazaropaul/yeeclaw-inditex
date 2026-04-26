@@ -7,7 +7,7 @@ from src.algorithms.storage import StorageEngine
 from src.algorithms.retrieval import RetrievalEngine
 from src.simulation.simulator import SimulationEngine
 
-def generate_dummy_boxes(count=1000, num_destinations=1):
+def generate_dummy_boxes(count=2000, num_destinations=5):
     """Generador de códigos de cajas ficticios para la prueba."""
     for i in range(count):
         source = "3010028"
@@ -34,7 +34,7 @@ def main():
     
     # ¡A VOLAR! Simulamos 10 horas de tiempo de almacén máximo (36000 segundos)
     print("Iniciando inyección de cajas y optimización en tiempo real...")
-    engine.run(stream, max_time=10000) 
+    engine.run(stream, max_time=1000) 
 
     # 4. Métricas Finales y Transformación a KPIs Inditex
     simulated_seconds = engine.global_time
