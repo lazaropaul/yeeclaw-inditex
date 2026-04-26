@@ -1,67 +1,71 @@
 import os
 from pathlib import Path
-
-# Importaciones de tu modelo
-from src.utils.csv_loader import load_silo_from_csv
-from src.model.silo_state import Box
+from src.model.silo_state import initialize_silo
 
 # Importaciones de los motores que hemos creado
 from src.algorithms.storage import StorageEngine
 from src.algorithms.retrieval import RetrievalEngine
-from src.simulation.simulator import SimulationEngine, Event, EventType
+from src.simulation.simulator import SimulationEngine
+
+def generate_dummy_boxes(count=1000, num_destinations=1):
+    """Generador de códigos de cajas ficticios para la prueba."""
+    for i in range(count):
+        source = "3010028"
+        destination = f"{(i % num_destinations):08d}"
+        bulk = f"{i:05d}"
+        yield f"{source}{destination}{bulk}"
 
 def main():
-    # 1. Calcular la ruta al archivo CSV
-    project_root = Path(__file__).parent
-    csv_path = project_root / 'data' / 'silo-semi-empty.csv'
-    
+    print("🚀 HackUPC 2026 - Algorithms for Greater Logistics Agility")
     print("=" * 60)
-    print("  INICIALIZANDO SILO DESDE CSV Y ARRANCANDO SIMULADOR")
-    print("=" * 60)
+
+    # 1. Inicializar Silo
+    silo = initialize_silo()
     
-    if not csv_path.exists():
-        print(f"ERROR: Archivo CSV no encontrado en: {csv_path}")
-        return
+    # 2. Instanciar los Motores (Algoritmos)
+    storage = StorageEngine(state=silo)
+    retrieval = RetrievalEngine(state=silo, storage_engine=storage)
     
-    print(f"Cargando datos desde: {csv_path.name}...")
-    silo_state = load_silo_from_csv(csv_path)
+    # 3. Arrancar Simulador (AQUÍ ESTÁ LA VARIABLE 'engine' QUE FALTABA)
+    engine = SimulationEngine(state=silo, storage_engine=storage, retrieval_engine=retrieval)
     
-    print("\nResumen del Estado del Silo (CSV):")
-    print(f"  Posiciones Totales: {len(silo_state.grid)}")
-    print(f"  Cajas Cargadas:     {silo_state.total_boxes()}")
-    print(f"  Ocupación:          {silo_state.occupancy_rate():.2%}")
-    print("-" * 60)
+    # Generamos flujo de cajas (Ej: 1200 cajas, unos 100 pallets potenciales)
+    stream = generate_dummy_boxes(count=2000, num_destinations=5)
     
-    # 2. Instanciar los Algoritmos (Cerebros)
-    # Al pasarle 'silo_state', el StorageEngine debe inicializar sus trackers
-    # de posiciones libres basados en la ocupación real del CSV.
-    storage = StorageEngine(state=silo_state)
-    retrieval = RetrievalEngine(state=silo_state, storage_engine=storage)
+    # ¡A VOLAR! Simulamos 10 horas de tiempo de almacén máximo (36000 segundos)
+    print("Iniciando inyección de cajas y optimización en tiempo real...")
+    engine.run(stream, max_time=10000) 
+
+    # 4. Métricas Finales y Transformación a KPIs Inditex
+    simulated_seconds = engine.global_time
+    simulated_hours = simulated_seconds / 3600.0
     
-    # 3. Instanciar el Motor DES (El Director de Orquesta)
-    sim = SimulationEngine(
-        state=silo_state, 
-        storage_engine=storage, 
-        retrieval_engine=retrieval
-    )
+    # 1 Pallet completo = 12 cajas extraídas
+    pallets_completed = engine.metrics.get("boxes_retrieved", 0) // 12
     
-    # 4. Crear un Escenario de Prueba (Inyectar Eventos)
-    print("\nInyectando eventos de prueba (Llegada de cajas nuevas)...")
-    
-    caja1 = Box("11111111111111111111", "RECEIVING", "PALLET-01", 1)
-    caja2 = Box("22222222222222222222", "RECEIVING", "PALLET-01", 1)
-    caja3 = Box("33333333333333333333", "RECEIVING", "PALLET-02", 2)
-    
-    sim.add_event(Event(timestamp=0.0, event_type=EventType.BOX_ARRIVAL, payload={'box': caja1}))
-    sim.add_event(Event(timestamp=5.0, event_type=EventType.BOX_ARRIVAL, payload={'box': caja2}))
-    sim.add_event(Event(timestamp=8.0, event_type=EventType.BOX_ARRIVAL, payload={'box': caja3}))
-    
-    # 5. ¡Ejecutar el motor de simulación!
-    print("\n" + "=" * 60)
-    sim.run()
-    print("=" * 60)
-    print("  SIMULACIÓN FINALIZADA")
-    print("=" * 60)
+    if pallets_completed > 0:
+        avg_time_pallet = simulated_seconds / pallets_completed 
+        throughput = pallets_completed / simulated_hours
+    else:
+        avg_time_pallet = 0.0
+        throughput = 0.0
+
+    total_pallets_posibles = engine.metrics.get("boxes_stored", 0) // 12
+    if total_pallets_posibles > 0:
+        full_pallet_pct = (pallets_completed / total_pallets_posibles) * 100.0
+    else:
+        full_pallet_pct = 0.0
+
+    # Dashboard Final
+    print("\n" + "=" * 55)
+    print("📊 FINAL METRICS (KPIs Inditex)")
+    print("=" * 55)
+    print(f"📦 Pallets Completed:      {pallets_completed}")
+    print(f"📈 Full Pallets (%):       {full_pallet_pct:.1f}%")
+    print(f"⏱️  Avg Time/Pallet:        {avg_time_pallet:.2f}s")
+    print(f"⚡ Throughput:             {throughput:.2f} pallets/hour")
+    print(f"📉 Final Silo Occupancy:   {silo.occupancy_rate():.1%}")
+    print(f"⏱️  Simulated Time:         {simulated_hours:.2f} hours")
 
 if __name__ == "__main__":
     main()

@@ -1,115 +1,91 @@
-from typing import List, Optional, Tuple
-# Asegúrate de importar tus clases reales de modelo
+from typing import List, Optional
 from src.model.silo_state import SiloState, SiloPosition, Box
 from src.algorithms.storage import StorageEngine
 
 class Task:
-    """Representa una tarea que el Shuttle debe ejecutar."""
     def __init__(self, task_type: str, box_id: str, source: SiloPosition, target: Optional[SiloPosition] = None):
-        self.task_type = task_type  # 'RETRIEVE' o 'RELOCATE'
+        self.task_type = task_type 
         self.box_id = box_id
         self.source = source
-        self.target = target        # Solo se usa si es RELOCATE (nueva posición) o RETRIEVE (Head, X=0)
+        self.target = target
 
     def __repr__(self):
-        return f"Task({self.task_type}, Box:{self.box_id}, From:{self.source.x}, To:{self.target.x if self.target else 'Head'})"
+        return f"Task({self.task_type}, Box:{self.box_id})"
 
 class RetrievalEngine:
     def __init__(self, state: SiloState, storage_engine: StorageEngine):
         self.state = state
-        self.storage_engine = storage_engine
+        self.storage = storage_engine
 
-    def get_next_tasks(self, shuttle_y: int, shuttle_x: int, active_pallets: list) -> List[Task]:
-        """
-        Calcula la siguiente mejor caja a extraer para un shuttle específico y 
-        devuelve la secuencia de tareas necesaria (1 o 2 tareas si hay bloqueo).
-        """
+    def get_next_tasks(self, shuttle_y: int, shuttle_x: int, active_pallets: list, aisle: int) -> List[Task]:
         best_box_info = None
         min_score = float('inf')
-        best_pallet = None
         best_relocation_pos = None
+        best_pallet = None
 
-        # 1 y 2. Recopilación y Filtrado por Nivel Y
         for pallet in active_pallets:
             boxes_left = len(pallet.pending_boxes)
             if boxes_left == 0:
                 continue
 
-            for box_id, box_pos in pallet.pending_boxes.items():
-                if box_pos.y != shuttle_y:
-                    continue  # El shuttle solo puede sacar cajas de su propio nivel
+            for box_id, box_pos in list(pallet.pending_boxes.items()):
+                # Filtro: El shuttle solo saca cajas de su Pasillo y su Nivel Y
+                if box_pos.y != shuttle_y or box_pos.aisle != aisle:
+                    continue
+                    
+                # Doble check de seguridad por si otro proceso movió la caja
+                actual_box = self.state.grid.get(box_pos)
+                if actual_box is None or actual_box.box_id != box_id:
+                    continue 
 
-                # 3. Cálculo de Scores (Multi-Objetivo)
+                # Calcular Score Base
                 dist_x = abs(shuttle_x - box_pos.x)
                 score = dist_x
-                
                 relocation_pos = None
                 
-                # Penalización Z (Gestión Explícita de Relocalización)
+                # Penalización Z y Cálculo de Relocalización
                 if box_pos.z == 2:
-                    # Comprobar si Z=1 está ocupada (Caja bloqueadora)
-                    z1_pos = SiloPosition(box_pos.x, box_pos.y, 1, box_pos.side, box_pos.aisle)
-                    blocking_box = self.state.get_box_at(z1_pos)
+                    z1_pos = SiloPosition(box_pos.aisle, box_pos.side, box_pos.x, box_pos.y, 1)
+                    blocking_box = self.state.grid.get(z1_pos)
                     
                     if blocking_box is not None:
-                        # Preguntamos al StorageEngine dónde podemos poner esta caja bloqueadora
-                        # Simulamos que es una caja nueva para buscarle hueco
-                        relocation_pos = self.storage_engine.peek_best_position(blocking_box)
-                        
+                        relocation_pos = self.storage.peek_best_position(blocking_box)
                         if relocation_pos:
-                            dist_mover_bloqueador = abs(z1_pos.x - relocation_pos.x)
-                            relocation_penalty = 10 + dist_mover_bloqueador
+                            dist_mover = abs(z1_pos.x - relocation_pos.x)
+                            score += 10 + dist_mover
                         else:
-                            # Si el silo está tan lleno que no hay dónde reubicar, penalización extrema
-                            relocation_penalty = 1000 
-                            
-                        score += relocation_penalty
+                            score += 1000 # Penalización extrema si no hay huecos
 
-                # Bonus Completitud
-                # Corrección matemática respecto al MD: Si queremos priorizar los que tienen MENOS cajas,
-                # restamos más puntos a los que les faltan pocas cajas (Ej: asumiendo 12 max por pallet).
+                # Prioridad por pallet casi terminado
                 urgency_bonus = (12 - boxes_left) * 2 
                 score -= urgency_bonus
 
-                # 4. Selección del Ganador
+                # Elegir ganador
                 if score < min_score:
                     min_score = score
                     best_box_info = (box_id, box_pos)
-                    best_pallet = pallet
                     best_relocation_pos = relocation_pos
+                    best_pallet = pallet
 
-        # 5. Generación de Tareas
         if not best_box_info:
-            return [] # No hay cajas accesibles/pendientes en este nivel Y
+            return [] # Nada que sacar para este shuttle
 
         target_box_id, target_box_pos = best_box_info
         tasks = []
 
-        # Si había una posición de reubicación calculada, significa que la caja ganadora estaba bloqueada
+        # Tarea A: Relocalizar (Si estaba bloqueada)
         if best_relocation_pos is not None:
-            z1_pos = SiloPosition(target_box_pos.x, target_box_pos.y, 1, target_box_pos.side, target_box_pos.aisle)
-            blocking_box = self.state.get_box_at(z1_pos)
-            
-            # Task A: RELOCATE la caja bloqueadora
-            task_a = Task(
-                task_type='RELOCATE', 
-                box_id=blocking_box.box_id, 
-                source=z1_pos, 
-                target=best_relocation_pos
-            )
-            tasks.append(task_a)
+            z1_pos = SiloPosition(target_box_pos.aisle, target_box_pos.side, target_box_pos.x, target_box_pos.y, 1)
+            blocking_box = self.state.grid.get(z1_pos)
+            if blocking_box:
+                tasks.append(Task('RELOCATE', blocking_box.box_id, z1_pos, best_relocation_pos))
 
-            # Opcional pero recomendado: Reservar físicamente la posición de reubicación 
-            # en el StorageEngine para que otro shuttle no la quite mientras tanto.
+        # Tarea B: Extracción Real (El target es un dummy en cabecera)
+        head_pos = SiloPosition(aisle, 1, 0, shuttle_y, 1)
+        tasks.append(Task('RETRIEVE', target_box_id, target_box_pos, head_pos))
 
-        # Task B: RETRIEVE la caja objetivo (Target = X:0, la cabecera)
-        head_pos = SiloPosition(x=0, y=shuttle_y, z=0, side='N/A', aisle='N/A')
-        task_b = Task(
-            task_type='RETRIEVE', 
-            box_id=target_box_id, 
-            source=target_box_pos, 
-            target=head_pos
-        )
-        tasks.append(task_b)
+        # Marcar la caja como "En Proceso" eliminándola del pallet
+        if target_box_id in best_pallet.pending_boxes:
+            del best_pallet.pending_boxes[target_box_id]
 
         return tasks
