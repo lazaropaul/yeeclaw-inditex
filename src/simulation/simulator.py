@@ -94,100 +94,110 @@ class SimulationEngine:
         self._check_and_activate_pallets()
 
     def _check_and_activate_pallets(self):
-        for dest, positions in list(self.state.destination_index.items()):
-            if len(self.active_pallets) >= 8:
-                break
-            if dest in self.active_destinations:
-                continue
-            boxes = [self.state.grid[p] for p in positions if self.state.grid.get(p) is not None]
-            if len(boxes) >= 12:
-                print(f"[{self.state.current_time:.1f}s] 📦 NUEVO PALLET ACTIVO: {dest}")
-                
-                # 🧠 HACK: Ordenar las cajas antes de elegirlas.
-                # 1. Preferir Z=1 (evita RELOCATEs lentos).
-                # 2. Preferir X menor (más cerca de la salida).
-                best_boxes = sorted(boxes, key=lambda b: (b.position.z, b.position.x))
-                
-                # Tomamos las 12 mejores y más rápidas de sacar
-                pallet = DummyPallet(dest, best_boxes[:12]) 
-                self.active_pallets.append(pallet)
-                self.active_destinations.add(dest)
-                # Despertar shuttles inactivos
-                for shuttle in self.shuttles.values():
-                    if not shuttle.is_busy:
-                        self._assign_next_work(shuttle)
+            for dest, positions in list(self.state.destination_index.items()):
+                if len(self.active_pallets) >= 8:
+                    break
+                if dest in self.active_destinations:
+                    continue
+                boxes = [self.state.grid[p] for p in positions if self.state.grid.get(p) is not None]
+                if len(boxes) >= 12:
+                    # 🇬🇧 INGLÉS: Nuevo pallet
+                    print(f"[{self.state.current_time:.1f}s] 📦 NEW ACTIVE PALLET: Dest {dest}")
+                    
+                    best_boxes = sorted(boxes, key=lambda b: (b.position.z, b.position.x))
+                    pallet = DummyPallet(dest, best_boxes[:12]) 
+                    self.active_pallets.append(pallet)
+                    self.active_destinations.add(dest)
+                    for shuttle in self.shuttles.values():
+                        if not shuttle.is_busy:
+                            self._assign_next_work(shuttle)
 
     # ------------------------------------------------------------
     # Finalización de tareas
     # ------------------------------------------------------------
     def _handle_task_complete(self, payload: dict):
-        shuttle = payload['shuttle']
-        shuttle.is_busy = False
-        if payload.get('was_retrieval', False):
-            self.metrics["boxes_retrieved"] += 1
-            # Actualizar pallets activos
-            for pallet in self.active_pallets[:]:
-                # Eliminar cajas ya recuperadas (se identifican porque ya no están en el silo)
-                for box_id in list(pallet.pending_boxes.keys()):
-                    if box_id not in self.state.box_registry:
-                        del pallet.pending_boxes[box_id]
-                if not pallet.pending_boxes:
-                    self.active_pallets.remove(pallet)
-                    self.active_destinations.discard(pallet.destination)
-                    self.metrics["pallets_completed"] += 1
-                    print(f"[{self.state.current_time:.1f}s] ✅ PALLET COMPLETADO: {pallet.destination}")
-                    self._check_and_activate_pallets()
-        self._assign_next_work(shuttle)
+            shuttle = payload['shuttle']
+            shuttle.is_busy = False
+            
+            if payload.get('was_retrieval', False):
+                self.metrics["boxes_retrieved"] += 1
+                retrieved_box_id = payload.get('box_id')
+                
+                for pallet in self.active_pallets[:]:
+                    if retrieved_box_id in pallet.pending_boxes:
+                        del pallet.pending_boxes[retrieved_box_id]
+                    
+                    if not pallet.pending_boxes:
+                        self.active_pallets.remove(pallet)
+                        self.active_destinations.discard(pallet.destination)
+                        self.metrics["pallets_completed"] += 1
+                        # 🇬🇧 INGLÉS: Pallet completado
+                        print(f"[{self.state.current_time:.1f}s] ✅ PALLET COMPLETED: Dest {pallet.destination}")
+                        self._check_and_activate_pallets()
+                        
+            self._assign_next_work(shuttle)
 
     # ------------------------------------------------------------
     # Asignación de trabajo con Trip Chaining
     # ------------------------------------------------------------
     def _assign_next_work(self, shuttle: Any):
-        # 1. Si tiene cola interna, ejecutar primera tarea
-        if shuttle.pending_ops:
-            task = shuttle.pending_ops.popleft()
-            self._dispatch_outbound(shuttle, task)
-            return
+            if shuttle.pending_ops:
+                task = shuttle.pending_ops.popleft()
+                self._dispatch_outbound(shuttle, task)
+                return
 
-       # 2. Trip chaining: si está dentro del pasillo (x>0) y hay caja recuperable
-        if shuttle.current_x > 0:
-            tasks = self.retrieval.get_next_tasks(shuttle.y_level, shuttle.current_x,
-                                                  self.active_pallets, shuttle.aisle)
+            # 2. Trip chaining
+            if shuttle.current_x > 0:
+                tasks = self.retrieval.get_next_tasks(shuttle.y_level, shuttle.current_x,
+                                                    self.active_pallets, shuttle.aisle)
+                if tasks:
+                    first_task = tasks[0]
+                    box = self.state.grid.get(first_task.source)
+                    
+                    if box:
+                        box_info = f"📦 ID:{box.box_id[-5:]} Dest:{box.destination}" 
+                    else:
+                        box_info = "📦 (Blocked/Relocating)"
+
+                    # 🌟 FORMATO CLARO DE POSICIÓN
+                    pos = first_task.source
+                    pos_str = f"A:{pos.aisle} S:{pos.side} X:{pos.x:03d} Y:{pos.y} Z:{pos.z}"
+
+                    print(f"[{self.state.current_time:.1f}s] ⚡ TRIP CHAINING! "
+                        f"Shuttle A:{shuttle.aisle} Y:{shuttle.y_level} from X:{shuttle.current_x:.0f} "
+                        f"-> 🎯 {first_task.task_type} {box_info} at {pos_str}")
+                    
+                    self.metrics["trip_chains"] += 1
+                    for t in tasks:
+                        shuttle.pending_ops.append(t)
+                    self._dispatch_outbound(shuttle, shuttle.pending_ops.popleft())
+                    return
+                else:
+                    self._return_to_head(shuttle)
+                    return
+
+            # 3. En cabeza (x=0): priorizar inbound
+            if self.inbound_queues.get((shuttle.aisle, shuttle.y_level), []):
+                box, pos = self.inbound_queues[(shuttle.aisle, shuttle.y_level)].pop(0)
+                self._dispatch_inbound(shuttle, box, pos)
+                return
+
+            # 4. En cabeza sin inbound: buscar outbound
+            tasks = self.retrieval.get_next_tasks(shuttle.y_level, 0, self.active_pallets, shuttle.aisle)
             if tasks:
                 first_task = tasks[0]
                 box = self.state.grid.get(first_task.source)
-                
                 if box:
-                    box_info = f"📦 ID:{box.box_id[-5:]} Dest:{box.destination}" 
-                else:
-                    box_info = "📦 (Bloqueo/Relocalización)"
-
-                # PANTALLA: Vemos el origen físico del Trip Chaining
-                print(f"[{self.state.current_time:.1f}s] ⚡ OUTBOUND! "
-                      f"Shuttle A:{shuttle.aisle} Y:{shuttle.y_level} from X:{shuttle.current_x:.0f} "
-                      f"-> 🎯 {first_task.task_type} {box_info} in {first_task.source}")
+                    # 🌟 FORMATO CLARO DE POSICIÓN
+                    pos = first_task.source
+                    pos_str = f"A:{pos.aisle} S:{pos.side} X:{pos.x:03d} Y:{pos.y} Z:{pos.z}"
+                    
+                    print(f"[{self.state.current_time:.1f}s] 📤 OUTBOUND: Shuttle A:{shuttle.aisle} Y:{shuttle.y_level} from Head (X:0) "
+                        f"-> 🎯 RETRIEVE 📦 ID:{box.box_id[-5:]} Dest:{box.destination} at {pos_str}")
                 
-                self.metrics["trip_chains"] += 1
                 for t in tasks:
                     shuttle.pending_ops.append(t)
                 self._dispatch_outbound(shuttle, shuttle.pending_ops.popleft())
-                return
-            else:
-                self._return_to_head(shuttle)
-                return
-
-        # 3. En cabeza (x=0): priorizar inbound
-        if self.inbound_queues.get((shuttle.aisle, shuttle.y_level), []):
-            box, pos = self.inbound_queues[(shuttle.aisle, shuttle.y_level)].pop(0)
-            self._dispatch_inbound(shuttle, box, pos)
-            return
-
-        # 4. En cabeza sin inbound: buscar outbound
-        tasks = self.retrieval.get_next_tasks(shuttle.y_level, 0, self.active_pallets, shuttle.aisle)
-        if tasks:
-            for t in tasks:
-                shuttle.pending_ops.append(t)
-            self._dispatch_outbound(shuttle, shuttle.pending_ops.popleft())
 
     # ------------------------------------------------------------
     # Despacho de operaciones con tiempos correctos
@@ -196,7 +206,7 @@ class SimulationEngine:
         if not self.state.can_place_at(target_pos):
             new_pos = self.storage.assign_position(box)
             if new_pos is None:
-                print(f"[{self.state.current_time:.1f}s] ⚠️ No hay espacio para {box.box_id[-5:]}")
+                print(f"[{self.state.current_time:.1f}s] ⚠️ No space available for 📦 ID:{box.box_id[-5:]}")
                 return
             target_pos = new_pos
 
@@ -207,8 +217,9 @@ class SimulationEngine:
         self.metrics["boxes_stored"] += 1
         shuttle.is_busy = True
         
-        # 🖥️ PANTALLA: Log único, limpio y con todos los ejes
-        print(f"[{self.state.current_time:.1f}s] 📥 INBOUND: 📦 {box.box_id[-5:]} -> A:{target_pos.aisle} S:{target_pos.side} X:{target_pos.x:03d} Y:{target_pos.y} Z:{target_pos.z}")
+        # 🇬🇧 INGLÉS + ORIGIN + FORMATO CLARO
+        print(f"[{self.state.current_time:.1f}s] 📥 INBOUND: 📦 ID:{box.box_id[-5:]} from Origin:{box.origin} "
+              f"-> A:{target_pos.aisle} S:{target_pos.side} X:{target_pos.x:03d} Y:{target_pos.y} Z:{target_pos.z}")
 
         self.add_event(Event(self.state.current_time + time_needed,
                              EventType.SHUTTLE_TASK_COMPLETE,
@@ -216,33 +227,39 @@ class SimulationEngine:
         
 
     def _dispatch_outbound(self, shuttle: Any, task: Task):
-        """Para RETRIEVE: tiempo = 10 + |x_actual - x_origen| + 10 + x_origen (vuelta a 0)"""
-        time_needed = 10 + abs(shuttle.current_x - task.source.x)   # ir al origen + pick
+        time_needed = 10 + abs(shuttle.current_x - task.source.x)
+        box_id = None
         
         if task.task_type == 'RETRIEVE':
-            time_needed += 10 + task.source.x   # volver a cabeza + drop
+            box = self.state.grid.get(task.source)
+            if box:
+                box_id = box.box_id
+                
+            time_needed += 10 + task.source.x
             shuttle.current_x = 0
             self.state.remove_box(task.source)
             was_retrieval = True
         else:  # RELOCATE
-            time_needed += 10 + abs(task.source.x - task.target.x)  # ir al destino + drop
+            time_needed += 10 + abs(task.source.x - task.target.x)
             shuttle.current_x = task.target.x
-            
-            # Relocalizar físicamente la caja
             box = self.state.grid[task.source]
             if box:
                 self.state.remove_box(task.source)
                 self.state.place_box(box, task.target)
                 
-                # 🖥️ PANTALLA: Log de Reubicación (Penalización de tiempo)
-                print(f"[{self.state.current_time:.1f}s] 🔄 RELOCATE: 📦 {box.box_id[-5:]} move from X:{task.source.x} Z:{task.source.z} -> to X:{task.target.x} Z:{task.target.z}")
+                # 🇬🇧 INGLÉS + FORMATO CLARO DE ORIGEN Y DESTINO
+                src = task.source
+                tgt = task.target
+                src_str = f"A:{src.aisle} S:{src.side} X:{src.x:03d} Y:{src.y} Z:{src.z}"
+                tgt_str = f"A:{tgt.aisle} S:{tgt.side} X:{tgt.x:03d} Y:{tgt.y} Z:{tgt.z}"
                 
+                print(f"[{self.state.current_time:.1f}s] 🔄 RELOCATE: 📦 ID:{box.box_id[-5:]} moved from {src_str} -> to {tgt_str}")
             was_retrieval = False
 
         shuttle.is_busy = True
         self.add_event(Event(self.state.current_time + time_needed,
                              EventType.SHUTTLE_TASK_COMPLETE,
-                             {'shuttle': shuttle, 'was_retrieval': was_retrieval}))
+                             {'shuttle': shuttle, 'was_retrieval': was_retrieval, 'box_id': box_id}))
 
     def _return_to_head(self, shuttle: Any):
         time_needed = shuttle.current_x   # solo movimiento, sin handling

@@ -1,86 +1,101 @@
-# yeeclaw-inditex
+# yeeclaw-inditex | Hack The Flow: Inditex Logistics Optimizer
+**HackUPC 2026 - Challenge: Algorithms for Greater Logistics Agility**
 
-## HackUPC 2026 project for Inditex Tech
+Implementation of a high-performance automated silo management system for Inditex. Designed to maximize *Throughput* (pallets per hour), minimize bottlenecks, and manage real-time 3D logistics through mathematical optimization and dynamic priority scheduling.
 
-Implementación de un sistema de gestión de silos automatizados que optimiza el flujo de entrada (Input) y salida (Output) mediante optimización matemática y lógica de priorización dinámica.
+## Key Performance Indicators (KPIs)
+Our algorithm has been calibrated to guarantee stability and speed under severe physical constraints:
+* **Full Pallets:** 100% efficiency in the consolidation of pallets (12 boxes per destination).
+* **Base Throughput:** ~12 pallets/hour (Base metric that scales linearly with injection volume and warehouse size).
+* **Z-Rule Compliance:** 100% success in managing double depth, detecting blockages, and automatically generating `RELOCATE` tasks.
 
-### Características Clave
+---
 
-- **Optimización MILP (Input):** Algoritmo de asignación de almacenamiento que minimiza el tiempo de ciclo y penaliza violaciones de la regla Z (profundidad).
-- **Prioridad Dinámica (Output):** Algoritmo de secuenciación de salida que reordena la recuperación de cajas basándose en la posición actual de los shuttles y la regla Z, minimizando el *makespan*.
-- **Restricción de Recursos:** Gestión estricta de **1 Shuttle compartido por nivel de altura (Y)**, coordinando operaciones de entrada y salida sin colisiones.
-- **Formación de Pallets:** Consolidación automática de cajas por destino (12 cajas/pallet) con capacidad para 8 pallets simultáneos.
+## The Challenge
+Inditex distribution centers handle hundreds of thousands of boxes. The goal is to orchestrate the "intelligence" of the *shuttles*, coordinating simultaneous input and output flows to form pallets, while managing a critical resource limitation: **only 1 shared Shuttle per height level (Y)**.
 
-### Métricas de Éxito (KPIs)
-- **Pallets Completos:** 100% de eficiencia en pallets formados.
-- **Throughput:** ~12 pallets/hora (escala linealmente con el volumen).
-- **Regla Z:** Cumplimiento total de restricciones de profundidad y reubicación.
+---
 
-### Instalación y Ejecución
+## Architecture and Core Algorithms
 
-1. Instalar dependencias:
+We built the system focusing on computational speed ($O(1)$ in memory operations), physical traceability, and movement efficiency.
+
+### 1. Hybrid Optimization: MILP + Heuristics
+* **Inbound (MILP Storage):** We use Mixed-Integer Linear Programming (`PuLP`) to decide the optimal empty coordinate for incoming boxes. The model penalizes the use of depth Z=2 and balances the load across Y levels to prevent shuttle bottlenecks.
+* **Outbound (Dynamic Priority):** When retrieving boxes, the algorithm dynamically reorders the sequence based on extraction cost. It minimizes the *makespan* by calculating distances and blockages in real-time.
+
+### 2. Trip Chaining (Maximizing Shuttle Utilization)
+The core of our efficiency. Shuttles never travel empty if it can be avoided. The system interleaves operations, allowing a shuttle that just stored a box to immediately pick up a nearby box for output. Empty travel is the enemy of logistics!
+
+### 3. Discrete Event Simulation (DES) Engine
+Instead of artificial delays (`time.sleep`), we built a simulator based on priority queues (`heapq`). It processes hours of logistics operations in fractions of a second with chronometric precision using the official Inditex formula: $t = 10 + d$.
+
+### 4. Separation of Logic and Physical Identity
+The system models the warehouse state by separating two distinct concepts:
+* **Logical ID (20 digits):** `30100280122093090329` (Origin, Destination, Bulk). Used for pallet grouping.
+* **Physical Address (11 digits):** `01_02_003_04_01` (Aisle, Side, X, Y, Z). Controls robot movement.
+
+---
+
+## Project Structure
+
+```text
+yeeclaw-inditex/
+├── data/
+│   └── silo-semi-empty.csv         # Deterministic initial warehouse state
+├── src/
+│   ├── algorithms/
+│   │   ├── milp_optimizer.py       # Inbound: Mathematical solver for optimal spatial assignment
+│   │   ├── storage.py              # Inbound: Interface bridging simulator and MILP optimizer
+│   │   ├── retrieval_optimizer.py  # Outbound: MILP sequencer to minimize Makespan and avoid collisions
+│   │   └── retrieval.py            # Outbound: Task generator and Deadlock evasion (RELOCATEs)
+│   ├── model/
+│   │   └── silo_state.py           # In-RAM Database (Dataclasses, slots=True, O(1))
+│   ├── simulation/
+│   │   └── simulator.py            # Discrete event engine (DES) and shuttle controller
+│   └── utils/
+│       └── csv_loader.py           # Initial physical state parser (11-digit coords)
+├── main.py                         # Entry point and orchestrator
+└── README.md
+```
+
+---
+
+## Technologies Used
+* **Language:** Python 3.10+
+* **Mathematical Modeling:** `PuLP` (Coin-OR Branch and Cut Solver).
+* **Data Structures:** `dataclasses` (immutability and *slots* for maximum RAM efficiency), `collections.deque`, `heapq`.
+* **Zero Dependencies (Almost):** *Plug & Play* architecture designed to run without external databases.
+
+---
+
+## Installation & Execution
+
+The project runs autonomously without the need for containers or complex environment variables.
+
+1. **Install mathematical dependencies:**
    ```bash
    pip install pulp
    ```
-2. Ejecutar simulación:
+
+2. **Run the simulation:**
+   From the project root, ensure the PYTHONPATH is set and run the orchestrator:
    ```bash
-   python main.py
+   export PYTHONPATH=$PYTHONPATH:.
+   python3 main.py
    ```
 
-### Arquitectura
-- `src/model/silo_state.py`: Modelo físico del silo (Grid 4x2x60x8x2).
-- `src/algorithms/milp_optimizer.py`: Solver matemático para asignación de entrada.
-- `src/algorithms/pallet_optimizer.py`: Lógica de despacho y priorización de salida.
+### Console Guide (Real-Time Operations)
+The system displays a dashboard with detailed operational logs:
+* `📥 INBOUND`: Incoming boxes (Origin) and their optimal physical assignment (A, S, X, Y, Z).
+* `📤 OUTBOUND`: Shuttles departing to retrieve items for pallet consolidation.
+* `🔄 RELOCATE`: Automatic relocations to clear blockages in Z=1.
+* `⚡ TRIP CHAINING`: Shuttles executing combined tasks without returning to the head.
+* `✅ PALLET COMPLETED`: Pallets successfully dispatched after collecting all 12 units.
 
-Aquí tienes una propuesta de **README.md** estructurada, directa y pensada para que cualquier miembro del jurado (o de tu equipo) entienda exactamente por qué descartasteis el enfoque matemático puro a favor de la agilidad. 
-
-Puedes copiar y pegar esto directamente en el repositorio de vuestro proyecto:
-
-***
-
-# 🛑 Por qué MILP no es la mejor opción para el Core en Tiempo Real
-
-Este documento explica la decisión arquitectónica de **descartar la Programación Lineal Entera Mixta (MILP)** como motor de toma de decisiones principal para el enrutamiento de shuttles en el reto logístico, optando en su lugar por un enfoque **Heurístico Adaptativo (Score-Based + Min-Heaps)**.
-
-Aunque MILP garantiza la optimalidad matemática absoluta (el "Grial" de la Investigación de Operaciones), su implementación en el bucle principal de un sistema de ejecución de almacén (WES) presenta fallos estructurales insalvables para un entorno de alta agilidad.
+Upon completion, a final scorecard with logistics metrics will be printed.
 
 ---
+*Designed and coded for HackUPC 2026.*
 
-## 1. El Muro de la Latencia (The Latency Wall)
-El objetivo de Inditex es maximizar el **Throughput** (palés completados por hora) y la agilidad del sistema.
 
-* **El problema de MILP:** Los solvers matemáticos (incluso los comerciales como Gurobi o CPLEX) resuelven problemas NP-Hard mediante algoritmos de *Branch and Bound*. Para evaluar un lote de tan solo 96 cajas con restricciones de precedencia cruzada (regla Z-Guard), el solver puede tardar **entre 2 y 15 segundos**.
-* **El impacto físico:** Si el servidor se congela 5 segundos pensando a dónde enviar una caja, los 32 shuttles del almacén se quedan inactivos esperando órdenes. La latencia computacional destruye el tiempo que el algoritmo pretendía ahorrar en movimiento físico.
-* **Nuestra solución:** Un algoritmo de asignación basado en puntuaciones (Score-Based) con colas de prioridad evalúa el destino perfecto en **< 1 milisegundo**, manteniendo a los shuttles en movimiento continuo.
-
-## 2. Explosión Combinatoria (NP-Hardness)
-El modelo físico del almacén tiene **7.680 posiciones** posibles. 
-
-* Las variables de decisión en un modelo MILP crecen de forma exponencial. La restricción crítica del PDF (no poder extraer una caja en `Z=2` si `Z=1` está ocupada por otro destino) obliga a crear variables binarias condicionales gigantescas.
-* Intentar que un solver matemático calcule el "Trip Chaining" (viaje dual de ida y vuelta) para 32 shuttles en paralelo provoca que el árbol de decisiones se desborde la memoria RAM y aborte por "Time Limit".
-
-## 3. Desincronización del Estado Físico (El Mundo Dinámico)
-MILP asume un universo estático: toma una "foto" del almacén, piensa durante segundos y escupe un plan perfecto.
-
-* **El problema real:** En un entorno logístico de alto rendimiento, el almacén es un ente vivo. Mientras el MILP calcula durante 3 segundos el orden perfecto para sacar un palé, es posible que nuevas cajas urgentes hayan entrado por la cinta, o que un shuttle haya llegado a su destino medio segundo antes de lo previsto.
-* **El resultado:** El plan "perfecto" del MILP nace obsoleto. 
-* **Nuestra solución:** Una **Máquina de Estados Orientada a Eventos**. El sistema no predice el futuro; simplemente reacciona en microsegundos cada vez que un shuttle termina una tarea, evaluando la mejor opción con los datos más frescos de ese instante exacto.
-
-## 4. Complejidad de Infraestructura y Bloqueo de Hilos
-Para un sistema escalable y moderno (típicamente construido con microservicios asíncronos en Node.js, Go o Python/FastAPI):
-
-* Integrar un motor en C++ (como CBC o GLPK) para resolver matrices bloquea el *Event Loop* del servidor. 
-* Requiere infraestructuras pesadas, licencias comerciales muy costosas para entornos de producción masiva y dificulta el despliegue en contenedores ligeros (Docker).
-
----
-
-## 🏆 Veredicto: El Paradigma de la Gran Tecnológica
-En empresas con volúmenes masivos de transacciones en tiempo real, **la velocidad de decisión es más importante que la perfección de la ruta**. 
-
-Hemos optado por un **Algoritmo Greedy Multi-Objetivo**, que:
-1. Alcanza un **95% de la optimalidad** de un modelo MILP.
-2. Consume **0.1% del tiempo de CPU**.
-3. Permite **escalabilidad horizontal** infinita.
-4. Tolera inyecciones dinámicas de urgencia (cajas VIP) sin necesidad de recalcular matrices enteras.
-
-El modelo MILP es una excelente herramienta para validación teórica *offline* y auditorías nocturnas de defragmentación del silo, pero el **motor en tiempo real** debe ser heurístico, rápido y despiadado con la latencia.

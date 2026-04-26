@@ -59,7 +59,7 @@ class RetrievalOptimizer:
         
         for i in range(n):
             # 1. Tiempo mínimo de inicio (shuttle debe estar libre)
-            prob += start_time[i] >= max(self.state.current_time, shuttles[i].busy_until) + durations[i], f"Earliest_{i}"
+            prob += start_time[i] >= max(self.state.current_time, shuttles[i].busy_until), f"Earliest_{i}"
             
             # 2. Makespan
             prob += start_time[i] + durations[i] <= makespan, f"Makespan_{i}"
@@ -73,7 +73,8 @@ class RetrievalOptimizer:
                     prob += start_time[j] + durations[j] <= start_time[i] + M * seq[(i, j)], f"NoOverlap_{i}_{j}_b"
 
         # ⚡ Resolver
-        prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=5))
+        # 1 segundo de tiempo límite, y un "Gap" del 10%
+        prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=1, gapRel=0.1))
 
         # 📦 Extraer secuencia óptima
         result = []
