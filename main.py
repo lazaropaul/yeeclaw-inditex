@@ -4,7 +4,7 @@ from src.model.silo_state import SiloState, initialize_silo
 from src.simulation.simulator import SimulationEngine
 
 
-def generate_dummy_boxes(count=2000, num_destinations=10):
+def generate_dummy_boxes(count=2000, num_destinations=5):
     for i in range(count):
         source = "3010028"
         destination = f"{(i % num_destinations):08d}"
@@ -19,10 +19,10 @@ def main():
     print(f"✅ Silo inicializado: {silo.occupancy_rate():.1%} ocupado")
 
     engine = SimulationEngine(silo)
-    stream = generate_dummy_boxes(count=2000, num_destinations=10)
+    stream = generate_dummy_boxes(count=2000, num_destinations=5)
 
     print("\n📥 Fase 1 y 2: Almacenamiento + Recuperación continua con Trip Chaining...")
-    engine.run(stream, max_time=2000)  # Simular 2000 segundos
+    engine.run(stream, max_time=1000)  # Simular 1000 segundos
 
     # Métricas finales
     actual_time = silo.current_time

@@ -19,9 +19,16 @@ class MilpOptimizer:
         if not valid_positions:
             return []
 
+        # 🧠 HACK MILP: Pre-calcular la ocupación actual de cada nivel para balancear la carga
+        occupancy_map = {}
+        for p, b in self.state.grid.items():
+            if b is not None:
+                key = (p.aisle, p.y)
+                occupancy_map[key] = occupancy_map.get(key, 0) + 1
+
         prob = pulp.LpProblem("StorageAssignment", pulp.LpMinimize)
 
-        # Variables binarias: x[b_id, p] = 1 si caja b va a posición p
+        # Variables binarias
         x_vars = pulp.LpVariable.dicts(
             "assign", 
             [(b.box_id, p) for b in incoming_boxes for p in valid_positions],
@@ -32,61 +39,58 @@ class MilpOptimizer:
         obj_terms = []
         for b in incoming_boxes:
             for p in valid_positions:
-                # Tiempo de ciclo completo según PDF: (10+d_ida) + (10+d_vuelta)
-                # Asumiendo shuttle en cabeza (X=0) tras completar ciclo anterior
                 time_cost = 20.0 + p.x
                 
-                # Penalización Z predictiva
                 z_penalty = 0.0
                 if p.z == 2:
                     front = SiloPosition(p.aisle, p.side, p.x, p.y, 1)
                     front_box = self.state.grid.get(front)
                     if front_box is None:
-                        z_penalty = 1000.0  # Imposible sin Z=1 ocupado
+                        z_penalty = 1000.0  # Imposible
                     elif front_box.destination != b.destination:
-                        z_penalty = 50.0    # Futura reubicación garantizada
+                        z_penalty = 50.0    # Futura reubicación
                 
-                # Bonus Clustering espacial
                 cluster_bonus = 0.0
                 for dx in range(-2, 3):
                     nx = p.x + dx
                     if 1 <= nx <= 60:
                         neighbor = self.state.grid.get(SiloPosition(p.aisle, p.side, nx, p.y, p.z))
                         if neighbor and neighbor.destination == b.destination:
-                            cluster_bonus -= 10.0  # Reduce costo
+                            cluster_bonus -= 10.0
                 
-                # ✅ CORREGIDO: w_cluster aplicado correctamente (antes era w_load)
-                cost = self.w_dist * time_cost + self.w_z * z_penalty + self.w_cluster * cluster_bonus
+                # ⚖️ NUEVO: Penalización por nivel lleno (Load Balancing)
+                # Cada caja extra en ese nivel suma 0.5 al costo
+                current_occupancy = occupancy_map.get((p.aisle, p.y), 0)
+                load_penalty = current_occupancy * 0.5
+                
+                # Sumamos el load_penalty al costo total
+                cost = self.w_dist * time_cost + self.w_z * z_penalty + self.w_cluster * cluster_bonus + load_penalty
                 obj_terms.append(cost * x_vars[(b.box_id, p)])
 
-        prob += pulp.lpSum(obj_terms), "TotalCycleTime"
+        prob += pulp.lpSum(obj_terms), "TotalCost"
 
-        # 📏 RESTRICCIONES
-        # 1. Cada caja asignada a EXACTAMENTE una posición
+        # 📏 RESTRICCIONES (Se mantienen igual)
         for b in incoming_boxes:
-            prob += pulp.lpSum(x_vars[(b.box_id, p)] for p in valid_positions) == 1, f"Assign_{b.box_id}"
+            prob += pulp.lpSum(x_vars[(b.box_id, p)] for p in valid_positions) == 1
             
-        # 2. Capacidad máxima por posición
         for p in valid_positions:
-            prob += pulp.lpSum(x_vars[(b.box_id, p)] for b in incoming_boxes) <= 1, f"Cap_{p}"
+            prob += pulp.lpSum(x_vars[(b.box_id, p)] for b in incoming_boxes) <= 1
             
-        # 3. Regla Z linealizada: Si asignas a Z=2, Z=1 debe ocuparse en este lote
         for p in valid_positions:
             if p.z == 2:
                 front = SiloPosition(p.aisle, p.side, p.x, p.y, 1)
                 if self.state.grid.get(front) is None:
                     prob += (pulp.lpSum(x_vars[(b.box_id, front)] for b in incoming_boxes) >= 
-                             pulp.lpSum(x_vars[(b.box_id, p)] for b in incoming_boxes)), f"ZRule_{p}"
+                             pulp.lpSum(x_vars[(b.box_id, p)] for b in incoming_boxes))
 
-        # ⚡ SOLVER: timeLimit=4s para garantizar agilidad en demo
+        # ⚡ SOLVER
         prob.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=4, gapRel=0.05))
 
         assignment = []
-        # Aceptamos Optimal o Feasible (CBC corta por tiempo/gap)
         if pulp.LpStatus[prob.status] in ['Optimal', 'Feasible']:
             for b in incoming_boxes:
                 for p in valid_positions:
-                    if pulp.value(x_vars[(b.box_id, p)]) > 0.5:  # Tolerancia numérica
+                    if pulp.value(x_vars[(b.box_id, p)]) > 0.5:
                         assignment.append((b, p))
                         break
         return assignment
