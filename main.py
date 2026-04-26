@@ -1,8 +1,11 @@
 import os
 from pathlib import Path
+import sys
 from src.model.silo_state import SiloState, initialize_silo
 from src.simulation.simulator import SimulationEngine
+from src.utils.csv_loader import load_silo_from_csv
 
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 def generate_dummy_boxes(count=2000, num_destinations=5):
     for i in range(count):
@@ -15,13 +18,21 @@ def main():
     print("🚀 HackUPC 2026 - Algorithms for Greater Logistics Agility")
     print("=" * 55)
 
-    silo = initialize_silo()      
-    print(f"✅ Silo inicializado: {silo.occupancy_rate():.1%} ocupado")
+    csv_path = Path("data/silo-semi-empty.csv") # Asegúrate de que la carpeta y el archivo existan
+    
+    if csv_path.exists():
+        print(f"📂 Cargando estado inicial desde: {csv_path}...")
+        silo = load_silo_from_csv(csv_path)
+    else:
+        print("⚠️ CSV no encontrado. Inicializando silo vacío...")
+        silo = initialize_silo()
+
+    print(f"✅ Silo listo: {silo.occupancy_rate():.1%} ocupado ({len(silo.box_registry)} cajas)")
 
     engine = SimulationEngine(silo)
     stream = generate_dummy_boxes(count=2000, num_destinations=5)
 
-    print("\n📥 Fase 1 y 2: Almacenamiento + Recuperación continua con Trip Chaining...")
+    print("\n📥 Ejecutando simulación (Procesando CSV + Inbound nuevo)...")
     engine.run(stream, max_time=1000)  # Simular 1000 segundos
 
     # Métricas finales
