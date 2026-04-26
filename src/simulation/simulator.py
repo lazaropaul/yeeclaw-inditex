@@ -149,13 +149,24 @@ class SimulationEngine:
             self._dispatch_outbound(shuttle, task)
             return
 
-        # 2. Trip chaining: si está dentro del pasillo (x>0) y hay caja recuperable
+       # 2. Trip chaining: si está dentro del pasillo (x>0) y hay caja recuperable
         if shuttle.current_x > 0:
             tasks = self.retrieval.get_next_tasks(shuttle.y_level, shuttle.current_x,
                                                   self.active_pallets, shuttle.aisle)
             if tasks:
-                print(f"[{self.state.current_time:.1f}s] ⚡ TRIP CHAINING! "
-                      f"Shuttle A:{shuttle.aisle} Y:{shuttle.y_level} desde X:{shuttle.current_x:.0f}")
+                first_task = tasks[0]
+                box = self.state.grid.get(first_task.source)
+                
+                if box:
+                    box_info = f"📦 ID:{box.box_id[-5:]} Dest:{box.destination}" 
+                else:
+                    box_info = "📦 (Bloqueo/Relocalización)"
+
+                # PANTALLA: Vemos el origen físico del Trip Chaining
+                print(f"[{self.state.current_time:.1f}s] ⚡ OUTBOUND! "
+                      f"Shuttle A:{shuttle.aisle} Y:{shuttle.y_level} from X:{shuttle.current_x:.0f} "
+                      f"-> 🎯 {first_task.task_type} {box_info} in {first_task.source}")
+                
                 self.metrics["trip_chains"] += 1
                 for t in tasks:
                     shuttle.pending_ops.append(t)
@@ -182,27 +193,32 @@ class SimulationEngine:
     # Despacho de operaciones con tiempos correctos
     # ------------------------------------------------------------
     def _dispatch_inbound(self, shuttle: Any, box: Box, target_pos: SiloPosition):
-        # Verificar si la posición sigue siendo válida
         if not self.state.can_place_at(target_pos):
             new_pos = self.storage.assign_position(box)
             if new_pos is None:
-                print(f"[{self.state.current_time:.1f}s] ⚠️ No hay espacio para {box.box_id}")
+                print(f"[{self.state.current_time:.1f}s] ⚠️ No hay espacio para {box.box_id[-5:]}")
                 return
             target_pos = new_pos
 
         dist_ida = abs(shuttle.current_x - target_pos.x)
-        time_needed = 10 + dist_ida + 10   # pick + viaje + drop (vuelta a 0 implícita? No, se queda en target)
+        time_needed = 10 + dist_ida + 10   # pick + viaje + drop
         shuttle.current_x = target_pos.x
         self.state.place_box(box, target_pos)
         self.metrics["boxes_stored"] += 1
         shuttle.is_busy = True
+        
+        # 🖥️ PANTALLA: Log único, limpio y con todos los ejes
+        print(f"[{self.state.current_time:.1f}s] 📥 INBOUND: 📦 {box.box_id[-5:]} -> A:{target_pos.aisle} S:{target_pos.side} X:{target_pos.x:03d} Y:{target_pos.y} Z:{target_pos.z}")
+
         self.add_event(Event(self.state.current_time + time_needed,
                              EventType.SHUTTLE_TASK_COMPLETE,
                              {'shuttle': shuttle, 'was_retrieval': False}))
+        
 
     def _dispatch_outbound(self, shuttle: Any, task: Task):
         """Para RETRIEVE: tiempo = 10 + |x_actual - x_origen| + 10 + x_origen (vuelta a 0)"""
         time_needed = 10 + abs(shuttle.current_x - task.source.x)   # ir al origen + pick
+        
         if task.task_type == 'RETRIEVE':
             time_needed += 10 + task.source.x   # volver a cabeza + drop
             shuttle.current_x = 0
@@ -211,11 +227,16 @@ class SimulationEngine:
         else:  # RELOCATE
             time_needed += 10 + abs(task.source.x - task.target.x)  # ir al destino + drop
             shuttle.current_x = task.target.x
+            
             # Relocalizar físicamente la caja
             box = self.state.grid[task.source]
             if box:
                 self.state.remove_box(task.source)
                 self.state.place_box(box, task.target)
+                
+                # 🖥️ PANTALLA: Log de Reubicación (Penalización de tiempo)
+                print(f"[{self.state.current_time:.1f}s] 🔄 RELOCATE: 📦 {box.box_id[-5:]} move from X:{task.source.x} Z:{task.source.z} -> to X:{task.target.x} Z:{task.target.z}")
+                
             was_retrieval = False
 
         shuttle.is_busy = True

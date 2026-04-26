@@ -39,9 +39,18 @@ def load_silo_from_csv(csv_path: str | Path, num_destinations: int = 40) -> Silo
             pos = parse_position_code(pos_str)
             box = parse_box(box_id_str)
             
-            silo.grid[pos] = box
+            # --- AQUÍ ES DONDE SE AÑADEN LAS CAJAS A LA MEMORIA ---
+            # 1. Coloca la caja en la cuadrícula física (el "mapa")
+            silo.grid[pos] = box 
+            
+            # 2. Le dice a la caja dónde está
             box.position = pos
+            
+            # 3. Registra la caja por su ID (para búsquedas rápidas)
             silo.box_registry[box.box_id] = box
-            silo.destination_index[box.destination].append(pos)
+            
+            # 4. Agrupa la posición de la caja por destino (para armar los pallets)
+            silo.destination_index[box.destination].append(pos) 
     
+    print(f" CSV Cargado: {len(silo.box_registry)} cajas ubicadas en sus posiciones reales de 11 dígitos.")
     return silo
