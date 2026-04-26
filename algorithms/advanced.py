@@ -97,19 +97,31 @@ class OptimizedOutputAlgorithm(OutputAlgorithm):
         if not needed_boxes:
             return None
             
+        def get_shuttle(pos):
+            for s in shuttles:
+                if s.aisle == pos.aisle and s.y == pos.y:
+                    return s
+            return None
+
         # CRITICAL OPTIMIZATION: Always prioritize retrieving Z=1 boxes over Z=2 boxes.
-        # If a channel has two boxes for our pallet, requesting Z=2 first will cause a reshuffle 
-        # penalty for pulling the blocking Z=1 away. By strictly pulling Z=1 first, we avoid 100% of reshuffles!
         z1_boxes = [pair for pair in needed_boxes if pair[1].z == 1]
         
         if z1_boxes:
-            # TSP Nearest Neighbor: optimize horizontal travel X.
-            z1_boxes.sort(key=lambda pair: pair[1].x)
+            # TSP Nearest Neighbor + Load Balancing: 
+            # 1. Prioritize whichever shuttle finishes first (lowest current_time)
+            # 2. Break ties by closest geographic X coordinate to maximize DCC.
+            z1_boxes.sort(key=lambda pair: (
+                get_shuttle(pair[1]).current_time,
+                abs(get_shuttle(pair[1]).current_x - pair[1].x)
+            ))
             return z1_boxes[0]
             
         z2_boxes = [pair for pair in needed_boxes if pair[1].z == 2]
         if z2_boxes:
-            z2_boxes.sort(key=lambda pair: pair[1].x)
+            z2_boxes.sort(key=lambda pair: (
+                get_shuttle(pair[1]).current_time,
+                abs(get_shuttle(pair[1]).current_x - pair[1].x)
+            ))
             return z2_boxes[0]
                 
         return None
